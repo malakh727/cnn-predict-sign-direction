@@ -1,10 +1,10 @@
 """
 Traffic Sign Dataset Generator - v3
-Generates 150 augmented training images per sign = 1500 total.
+Generates 152 augmented training images per sign = 1520 total.
 Only uses NumPy and PIL as required by the assignment.
 
 Expected input:  ./base_images/<sign_number>_0.png
-Output:          ./dataset/<sign_number>_<version>.png  (0–149)
+Output:          ./dataset/<sign_number>_<version>.png
 """
 
 import os
@@ -107,23 +107,24 @@ def elastic(arr, dx, dy):
     return shift(rotate(arr, dx * 2), dx, dy)
 
 
-# ── Augmentation Pipeline (150 per sign) ─────────────────────────────────────
+# ── Augmentation Pipeline (152 per sign) ─────────────────────────────────────
 #
-#  Group 1  v0       : original
-#  Group 2  v1–16    : rotations (fine-grained)
-#  Group 3  v17–32   : shifts (all directions including diagonals)
-#  Group 4  v33–40   : scales
-#  Group 5  v41–52   : noise variants (random flip noise)
-#  Group 6  v53–60   : salt & pepper noise variants
-#  Group 7  v61–63   : thicken / blur / thicken+blur
-#  Group 8  v64–65   : double thicken, blur+thicken
-#  Group 9  v66–79   : rotate + noise combos
-#  Group 10 v80–91   : shift + noise combos
-#  Group 11 v92–99   : scale + noise combos
-#  Group 12 v100–115 : rotate + shift combos
-#  Group 13 v116–125 : thicken/blur + rotate combos
-#  Group 14 v126–137 : elastic (shift+rotate) combos
-#  Group 15 v138–149 : triple combos (rotate + shift + noise)
+#  Group 1  v0      : original
+#  Group 2  v1–16   : rotations (fine-grained)
+#  Group 3  v17–32  : shifts (all directions including diagonals)
+#  Group 4  v33–40  : scales
+#  Group 5  v41–47  : noise variants (capped at 0.08 — no blur used)
+#  Group 6  v48–55  : salt & pepper noise variants
+#  Group 7  v56     : thicken only (blur removed — destroys thin strokes)
+#  Group 8  v57     : double thicken
+#  Group 9  v58–71  : rotate + noise combos
+#  Group 10 v72–83  : shift + noise combos
+#  Group 11 v84–91  : scale + noise combos
+#  Group 12 v92–107 : rotate + shift combos
+#  Group 13 v108–112: thicken + rotate combos (blur variants removed)
+#  Group 14 v113–124: elastic (shift+rotate) combos
+#  Group 15 v125–136: triple combos (rotate + shift + noise)
+#  Group 16 v137–151: harder variants (extreme rot/shift/scale, no heavy noise)
 
 def augment(base, sign):
     version = 0
@@ -148,26 +149,23 @@ def augment(base, sign):
                    (-2,-1),(2,1),(-1,-2),(1,2)]:
         s(shift(base, dx, dy))
 
-    # Group 4: Scales (8) → v33–40
-    for f in [0.75, 0.80, 0.85, 0.88, 0.92, 0.95, 1.10, 1.20]:
+    # Group 4: Scales (8) — minimum 0.90 to keep sign readable on 19×19
+    for f in [0.90, 0.92, 0.95, 0.97, 1.05, 1.10, 1.15, 1.20]:
         s(scale(base, f))
 
-    # Group 5: Noise variants random flip (12) → v41–52
-    for prob in [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13]:
+    # Group 5: Noise variants random flip (7) — capped at 0.08
+    for prob in [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08]:
         s(add_noise(base, prob=prob))
 
-    # Group 6: Salt & pepper noise (8) → v53–60
+    # Group 6: Salt & pepper noise (8)
     for prob in [0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]:
         s(salt_pepper(base, prob=prob))
 
-    # Group 7: Thicken / blur combos (3) → v61–63
+    # Group 7: Thicken only (1) — blur removed, destroys thin strokes on 19×19
     s(thicken(base))
-    s(blur(base))
-    s(blur(thicken(base)))
 
-    # Group 8: Double thicken, blur+thicken (2) → v64–65
+    # Group 8: Double thicken (1) — blur combos removed
     s(thicken(thicken(base)))
-    s(thicken(blur(base)))
 
     # Group 9: Rotate + noise (14) → v66–79
     for angle, prob in [(-15,0.03),(-12,0.04),(-10,0.03),(-7,0.04),(-5,0.03),(-3,0.02),
@@ -181,8 +179,8 @@ def augment(base, sign):
                          (-2,-1,0.03),(2,1,0.03),(-1,-2,0.03),(1,2,0.03)]:
         s(add_noise(shift(base, dx, dy), prob=prob))
 
-    # Group 11: Scale + noise (8) → v92–99
-    for f, prob in [(0.80,0.03),(0.85,0.03),(0.90,0.03),(0.95,0.03),
+    # Group 11: Scale + noise (8) — minimum 0.90 to match Group 4
+    for f, prob in [(0.90,0.03),(0.92,0.03),(0.95,0.03),(0.97,0.03),
                     (1.05,0.03),(1.10,0.03),(1.15,0.03),(1.20,0.03)]:
         s(add_noise(scale(base, f), prob=prob))
 
@@ -193,10 +191,9 @@ def augment(base, sign):
                           (-7,-1,1),(7,1,-1),(-3,2,0),(3,-2,0)]:
         s(shift(rotate(base, angle), dx, dy))
 
-    # Group 13: Thicken/blur + rotate (10) → v116–125
+    # Group 13: Thicken + rotate (5) — blur variants removed
     for angle in [-15, -10, -5, 0, 5]:
         s(rotate(thicken(base), angle))
-        s(rotate(blur(base), angle))
 
     # Group 14: Elastic combos (12) → v126–137
     for dx, dy in [(-2,-1),(-1,-2),(2,1),(1,2),
@@ -212,6 +209,22 @@ def augment(base, sign):
                                  (-15,1,1,0.03),(15,-1,-1,0.03),
                                  (-7,1,-1,0.03),(7,-1,1,0.03)]:
         s(add_noise(shift(rotate(base, angle), dx, dy), prob=prob))
+
+    # Group 16: Harder variants — extreme rot/shift/scale (15), heavy noise removed
+    # Extreme rotations (±18°, ±22°, ±25°)
+    for angle in [-25, -22, -18, 18, 22, 25]:
+        s(rotate(base, angle))
+
+    # Large shifts (±4px, diagonal ±3)
+    for dx, dy in [(4, 0), (-4, 0), (0, 4), (0, -4), (3, 3), (-3, -3)]:
+        s(shift(base, dx, dy))
+
+    # Extreme scale up only (0.70/0.72 removed — too small for 19×19)
+    s(scale(base, 1.25))
+
+    # Extreme rotation + light noise combos
+    s(add_noise(rotate(base,  25), prob=0.04))
+    s(add_noise(rotate(base, -25), prob=0.04))
 
     print(f"  Sign {sign}: {version} images generated.")
     return version
