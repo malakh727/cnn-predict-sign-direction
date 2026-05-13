@@ -18,7 +18,7 @@ current_directory = os.getcwd()
 images_directory  = os.path.join(current_directory, "dataset")
 
 TRAIN_DIR     = images_directory
-TEST_DIR      = "../TestingImages" # Change to "../TestingImages" if using the provided test set
+TEST_DIR      = "../TestingImages" # Change to the desired test set
 IMG_SIZE      = (19, 19)
 NUM_CLASSES   = 10
 THRESHOLD     = 128
@@ -28,6 +28,11 @@ HIDDEN_SIZE   = 128
 LEARNING_RATE = 0.005
 EPOCHS        = 700
 DROPOUT_RATE  = 0.2      # drop 20% of hidden neurons during training
+
+# ── Mode ──────────────────────────────────────────────────────────────────────
+# Set TEST_MODE = True to skip training and evaluate on TEST_DIR using saved weights.
+# Set TEST_MODE = False to train from scratch and save weights.
+TEST_MODE     = True
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -54,6 +59,23 @@ def load_dataset(directory):
         X.append(arr)
         y.append(label)
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.int32)
+
+
+def load_test_dataset(directory):
+    """Like load_dataset but also returns the original filenames for the test loop."""
+    X, y, file_list = [], [], []
+    for fname in sorted(os.listdir(directory)):
+        if not fname.lower().endswith('.png'):
+            continue
+        try:
+            label = int(fname.split('_')[0])
+        except ValueError:
+            continue
+        arr = load_and_binarize(os.path.join(directory, fname))
+        X.append(arr)
+        y.append(label)
+        file_list.append(fname)
+    return np.array(X, dtype=np.float32), np.array(y, dtype=np.int32), file_list
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -317,11 +339,11 @@ class FCNetwork:
     def predict(self, x):
         return np.argmax(self.forward(x, training=False))
 
-    def save(self, path="model_weights.npz"):
+    def save(self, path="parameter.npz"):
         np.savez(path, W1=self.W1, b1=self.b1, W2=self.W2, b2=self.b2)
         print(f"  Model saved to {path}")
 
-    def load(self, path="model_weights.npz"):
+    def load(self, path="parameter.npz"):
         data    = np.load(path)
         self.W1 = data['W1']
         self.b1 = data['b1']
@@ -415,54 +437,106 @@ def predict_single(image_path, nn, kernels_l0, kernels_l1, feat_max):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    print("=" * 60)
-    print("  Traffic Sign CNN  (v3 — Dropout + 40 features + 1520 imgs, 700 epochs)")
-    print("=" * 60)
+    kernels_l0 = get_fixed_kernels()
+    kernels_l1 = get_layer1_kernels(len(kernels_l0))
 
-    kernels_l0 = get_fixed_kernels()                        # (10, 5, 5)
-    kernels_l1 = get_layer1_kernels(len(kernels_l0))       # (10, 40, 2, 2)
+    # ── TEST MODE ─────────────────────────────────────────────────────────────
+    if TEST_MODE:
+        print("=" * 60)
+        print("  Traffic Sign CNN — TEST MODE")
+        print("=" * 60)
 
-    print("\n[1] Loading training data...")
-    X_raw, y_train = load_dataset(TRAIN_DIR)
-    print(f"    {len(X_raw)} images loaded.")
+        # Load saved weights
+        data = np.load('parameter.npz')
+        n_features = len(kernels_l0) * 4
+        cnn = FCNetwork(input_size=n_features, hidden_size=HIDDEN_SIZE,
+                        output_size=NUM_CLASSES, lr=LEARNING_RATE,
+                        dropout_rate=DROPOUT_RATE)
+        cnn.W1 = data["W1"]
+        cnn.b1 = data["b1"]
+        cnn.W2 = data["W2"]
+        cnn.b2 = data["b2"]
+        print("  Model loaded from parameter.npz")
 
-    print("\n[2] Extracting features (CNN layers 0 & 1)...")
-    X_train = np.array([extract_features(img, kernels_l0, kernels_l1)
-                        for img in X_raw], dtype=np.float32)
-    print(f"    Feature vector size: {X_train.shape[1]}")
+        feat_max = np.load('feat_max.npy')
 
-    feat_max = X_train.max(axis=0) + 1e-8
-    X_train  = X_train / feat_max
+        # Load test images
+        print(f"\n  Directory: {TEST_DIR}\n")
+        X_raw, test_labels, file_list = load_test_dataset(TEST_DIR)
+        test_images = np.array([extract_features(img, kernels_l0, kernels_l1)
+                                 for img in X_raw], dtype=np.float32)
+        test_images = test_images / feat_max
 
-    feature_size = X_train.shape[1]
-    print(f"\n[3] Training FC Neural Network "
-          f"({feature_size} -> {HIDDEN_SIZE} -> {NUM_CLASSES}, "
-          f"{EPOCHS} epochs, dropout={DROPOUT_RATE})...")
-    nn = FCNetwork(input_size=feature_size, hidden_size=HIDDEN_SIZE,
-                   output_size=NUM_CLASSES, lr=LEARNING_RATE,
-                   dropout_rate=DROPOUT_RATE)
-    train(X_train, y_train, nn)
+        # Test loop — professor's format
+        Image_Passed_Counter = 0
+        Image_Failed_Counter = 0
 
-    print("\n[4] Evaluating on training set...")
-    evaluate(X_train, y_train, nn, split_name="Train")
+        for i in range(len(test_images)):
+            pred = cnn.predict(test_images[i])
+            true = test_labels[i]
+            file_name = file_list[i]
 
-    if os.path.exists(TEST_DIR) and len(os.listdir(TEST_DIR)) > 0:
-        print("\n[5] Loading & evaluating on testing set...")
-        X_test_raw, y_test = load_dataset(TEST_DIR)
-        X_test = np.array([extract_features(img, kernels_l0, kernels_l1)
-                           for img in X_test_raw], dtype=np.float32)
-        X_test = X_test / feat_max
-        evaluate(X_test, y_test, nn, split_name="Test")
+            if pred == true:
+                print("Passed: Image Name =", file_name)
+                Image_Passed_Counter += 1
+            else:
+                print("Failed: Image Name =", file_name)
+                Image_Failed_Counter += 1
+
+        total = Image_Passed_Counter + Image_Failed_Counter
+        print()
+        print("Total of Passed Images =", Image_Passed_Counter)
+        print("Total of Failed Images =", Image_Failed_Counter)
+        print(f"Accuracy = {Image_Passed_Counter}/{total} = {Image_Passed_Counter/total*100:.1f}%")
+
+    # ── TRAIN MODE ────────────────────────────────────────────────────────────
     else:
-        print("\n[5] No TestingImages folder found, skipping.")
+        print("=" * 60)
+        print("  Traffic Sign CNN  (v3 — Dropout + 40 features + 1520 imgs, 700 epochs)")
+        print("=" * 60)
 
-    print("\n[6] Saving model...")
-    nn.save("model_weights.npz")
-    np.save("feat_max.npy", feat_max)
+        print("\n[1] Loading training data...")
+        X_raw, y_train = load_dataset(TRAIN_DIR)
+        print(f"    {len(X_raw)} images loaded.")
 
-    print("\n" + "=" * 60)
-    print("  Done!")
-    print("=" * 60)
+        print("\n[2] Extracting features (CNN layers 0 & 1)...")
+        X_train = np.array([extract_features(img, kernels_l0, kernels_l1)
+                            for img in X_raw], dtype=np.float32)
+        print(f"    Feature vector size: {X_train.shape[1]}")
+
+        feat_max = X_train.max(axis=0) + 1e-8
+        X_train  = X_train / feat_max
+
+        feature_size = X_train.shape[1]
+        print(f"\n[3] Training FC Neural Network "
+              f"({feature_size} -> {HIDDEN_SIZE} -> {NUM_CLASSES}, "
+              f"{EPOCHS} epochs, dropout={DROPOUT_RATE})...")
+        nn = FCNetwork(input_size=feature_size, hidden_size=HIDDEN_SIZE,
+                       output_size=NUM_CLASSES, lr=LEARNING_RATE,
+                       dropout_rate=DROPOUT_RATE)
+        train(X_train, y_train, nn)
+
+        print("\n[4] Evaluating on training set...")
+        evaluate(X_train, y_train, nn, split_name="Train")
+
+        if os.path.exists(TEST_DIR) and len(os.listdir(TEST_DIR)) > 0:
+            print("\n[5] Loading & evaluating on testing set...")
+            X_test_raw, y_test = load_dataset(TEST_DIR)
+            X_test = np.array([extract_features(img, kernels_l0, kernels_l1)
+                               for img in X_test_raw], dtype=np.float32)
+            X_test = X_test / feat_max
+            evaluate(X_test, y_test, nn, split_name="Test")
+        else:
+            print("\n[5] No TestingImages folder found, skipping.")
+
+        print("\n[6] Saving model...")
+        np.savez('parameter.npz', W1=nn.W1, b1=nn.b1, W2=nn.W2, b2=nn.b2)
+        np.save("feat_max.npy", feat_max)
+        print("  Saved parameter.npz and feat_max.npy")
+
+        print("\n" + "=" * 60)
+        print("  Done!")
+        print("=" * 60)
 
 
 if __name__ == "__main__":
