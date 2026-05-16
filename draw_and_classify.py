@@ -31,8 +31,12 @@ _n_features = len(_kernels_l0) * 4   # 10 channels × 4 quadrants = 40
 _nn         = FCNetwork(input_size=_n_features, hidden_size=HIDDEN_SIZE,
                         output_size=NUM_CLASSES, lr=LEARNING_RATE,
                         dropout_rate=DROPOUT_RATE)
-_nn.load("parameter.npz")
-_feat_max   = np.load("feat_max.npy")
+_data     = np.load("parameter.npz")
+_nn.W1    = _data["W1"]
+_nn.b1    = _data["b1"]
+_nn.W2    = _data["W2"]
+_nn.b2    = _data["b2"]
+_feat_max = _data["feat_max"]
 
 
 def _jaccard(a: np.ndarray, b: np.ndarray) -> float:

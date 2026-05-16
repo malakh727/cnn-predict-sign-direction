@@ -456,9 +456,8 @@ def main():
         cnn.b1 = data["b1"]
         cnn.W2 = data["W2"]
         cnn.b2 = data["b2"]
+        feat_max = data["feat_max"]
         print("  Model loaded from parameter.npz")
-
-        feat_max = np.load('feat_max.npy')
 
         # Load test images
         print(f"\n  Directory: {TEST_DIR}\n")
@@ -530,9 +529,9 @@ def main():
             print("\n[5] No TestingImages folder found, skipping.")
 
         print("\n[6] Saving model...")
-        np.savez('parameter.npz', W1=nn.W1, b1=nn.b1, W2=nn.W2, b2=nn.b2)
-        np.save("feat_max.npy", feat_max)
-        print("  Saved parameter.npz and feat_max.npy")
+        np.savez('parameter.npz', W1=nn.W1, b1=nn.b1, W2=nn.W2, b2=nn.b2,
+                 feat_max=feat_max)
+        print("  Saved parameter.npz")
 
         print("\n" + "=" * 60)
         print("  Done!")
